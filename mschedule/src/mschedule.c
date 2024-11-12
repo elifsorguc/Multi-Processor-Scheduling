@@ -22,6 +22,8 @@ typedef enum
     SJF   // Shortest Job First (non-preemptive)
 } scheduling_algorithm;
 
+scheduling_algorithm selected_algorithm;
+
 // Structure to represent a burst (process) to be handled by a processor
 typedef struct burst
 {
@@ -101,6 +103,9 @@ void print_summary();
 void add_completed_burst(burst_t *burst);
 void read_bursts_from_file(const char *filename);
 
+burst_t *dequeue_fcfs(queue_t *queue);
+burst_t *dequeue_sjf(queue_t *queue);
+
 // Function to store completed burst
 void add_completed_burst(burst_t *burst)
 {
@@ -165,7 +170,28 @@ void enqueue(queue_t *queue, burst_t *burst)
         printf("Enqueued burst with PID %d and length %d ms\n", burst->pid, burst->length);
 }
 
+// Function to initialize the selected scheduling algorithm
+void set_scheduling_algorithm(scheduling_algorithm algo)
+{
+    selected_algorithm = algo;
+}
+
+// Modified dequeue function to handle both FCFS and SJF
 burst_t *dequeue(queue_t *queue)
+{
+    if (selected_algorithm == FCFS)
+    {
+        return dequeue_fcfs(queue);
+    }
+    else if (selected_algorithm == SJF)
+    {
+        return dequeue_sjf(queue);
+    }
+    return NULL;
+}
+
+// FCFS dequeue - simply removes the burst at the head of the queue
+burst_t *dequeue_fcfs(queue_t *queue)
 {
     if (queue->head == NULL)
         return NULL;
@@ -173,12 +199,65 @@ burst_t *dequeue(queue_t *queue)
     burst_t *burst = old_head->burst;
     queue->head = old_head->next;
     if (queue->head == NULL)
-    {
         queue->tail = NULL;
-    }
     free(old_head);
-    if (outmode == 3)
-        printf("Dequeued burst with PID %d\n", burst->pid);
+    return burst;
+}
+
+// SJF dequeue - finds the shortest burst in the queue and removes it
+burst_t *dequeue_sjf(queue_t *queue)
+{
+    if (queue->head == NULL)
+    {
+        return NULL;
+    }
+
+    node_t *prev = NULL;
+    node_t *shortest_prev = NULL;
+    node_t *current = queue->head;
+    node_t *shortest_node = NULL;
+    long current_time = get_current_time(); // Get the current simulation time
+
+    // Traverse the queue to find the shortest burst that has already arrived
+    while (current != NULL)
+    {
+        if (current->burst->arrival_time <= current_time)
+        { // Check if burst has arrived
+            if (shortest_node == NULL || current->burst->length < shortest_node->burst->length)
+            {
+                shortest_prev = prev;
+                shortest_node = current;
+            }
+        }
+        prev = current;
+        current = current->next;
+    }
+
+    // If no bursts have arrived yet, return NULL
+    if (shortest_node == NULL)
+    {
+        return NULL;
+    }
+
+    // Remove the shortest node from the queue
+    burst_t *burst = shortest_node->burst;
+    if (shortest_node == queue->head)
+    {
+        queue->head = shortest_node->next;
+        if (queue->head == NULL)
+        {
+            queue->tail = NULL;
+        }
+    }
+    else
+    {
+        shortest_prev->next = shortest_node->next;
+        if (shortest_node == queue->tail)
+        {
+            queue->tail = shortest_prev;
+        }
+    }
+    free(shortest_node);
     return burst;
 }
 
@@ -460,11 +539,15 @@ void print_summary()
 {
     long total_turnaround_time = 0;
 
-    printf("pid   cpu  burstlen   arv   finish  waitingtime  turnaround\n");
+    // Print header with fixed-width formatting
+    printf("pid   cpu  burstlen   arv    finish    waitingtime   turnaround\n");
+
     for (int i = 0; i < burst_count; i++)
     {
         burst_t *burst = completed_bursts[i];
-        printf("%d     %d     %d        %ld     %ld        %ld        %ld\n",
+
+        // Adjust the width of each column using field width specifiers
+        printf("%-4d  %-3d  %-9d  %-6ld  %-9ld  %-12ld  %-10ld\n",
                burst->pid, burst->cpu_id, burst->length, burst->arrival_time,
                burst->finish_time, burst->waiting_time, burst->turnaround_time);
 
@@ -546,9 +629,12 @@ int main(int argc, char *argv[])
     init_simulation_time();
 
     // Initialize completed bursts array
-    completed_bursts = malloc(args.PC * sizeof(burst_t *)); // Assuming PC is the number of bursts
+    completed_bursts = malloc(args.PC * sizeof(burst_t *));
 
-    // Initialize single or multi-queue setup based on arguments
+    // Set the selected scheduling algorithm
+    set_scheduling_algorithm(args.scheduling_algo);
+
+    // Initialize queues and threads
     if (is_multi_queue)
     {
         initialize_multi_queues();
@@ -559,19 +645,16 @@ int main(int argc, char *argv[])
         pthread_mutex_init(&queue_lock, NULL);
         pthread_cond_init(&single_queue_not_empty, NULL);
     }
-
-    // Start processor threads
     create_processor_threads();
 
-    // Generate bursts based on input file or random generation
+    // Process input file or generate random bursts
     if (args.input_file)
     {
-        read_bursts_from_file(args.input_file); // Use file for burst generation
+        read_bursts_from_file(args.input_file);
     }
     else if (args.random_generation)
     {
-        srand(time(NULL)); // Seed the random number generator
-
+        srand(time(NULL));
         for (int i = 0; i < args.PC; i++)
         {
             burst_t *new_burst = malloc(sizeof(burst_t));
@@ -580,10 +663,9 @@ int main(int argc, char *argv[])
             new_burst->length = generate_random_time(args.T, args.L1, args.L2);
             new_burst->next = NULL;
 
-            // Enqueue the burst based on queue type
             if (is_multi_queue)
             {
-                add_burst_to_queue(new_burst, RM); // Use Round-Robin
+                add_burst_to_queue(new_burst, RM);
             }
             else
             {
@@ -592,12 +674,11 @@ int main(int argc, char *argv[])
                 pthread_cond_signal(&single_queue_not_empty);
                 pthread_mutex_unlock(&queue_lock);
             }
-
-            usleep(generate_random_time(args.T, args.T1, args.T2) * 1000); // Simulate interarrival time
+            usleep(generate_random_time(args.T, args.T1, args.T2) * 1000);
         }
     }
 
-    // Allow simulation to end once all bursts are processed
+    // Allow simulation to finish, clean up, and print summary
     simulation_running = 0;
     if (is_multi_queue)
     {
@@ -611,11 +692,7 @@ int main(int argc, char *argv[])
         pthread_cond_broadcast(&single_queue_not_empty);
     }
     wait_for_threads_to_finish();
-
-    // Print summary of the simulation
     print_summary();
-
-    // Clean up allocated resources
     cleanup();
 
     return EXIT_SUCCESS;
