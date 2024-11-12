@@ -6,7 +6,7 @@ CFLAGS = -Wall -g -pthread  # Enable warnings, debugging, and pthread support
 TARGET = mschedule
 
 # Source files
-SRC = main.c scheduler_fcfs.c scheduler_multiqueue.c thread_manager.c utils.c
+SRC = main1.c scheduler_fcfs_1.c scheduler_multiqueue_1.c thread_manager_1.c utils_1.c
 
 # Object files (replace .c with .o in the list of source files)
 OBJ = $(SRC:.c=.o)
