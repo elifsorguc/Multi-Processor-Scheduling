@@ -1,31 +1,3 @@
-/*
- * Multi-threaded Multiprocessor Scheduling Simulation
- *
- * Overview:
- * This program simulates a multiprocessor scheduling system, allowing two approaches:
- * - Single-Queue Approach: A single, shared queue where processors pull tasks.
- * - Multi-Queue Approach: Each processor has its own dedicated queue.
- *
- * Scheduling Algorithms:
- * The program supports two scheduling algorithms:
- * - First-Come, First-Served (FCFS)
- * - Shortest Job First (SJF - non-preemptive)
- *
- * Command-line Arguments:
- * The program accepts various command-line arguments to specify:
- *  - Number of processors (`-n`)
- *  - Queue approach (Single or Multi) and method (Round-Robin or Load-Balancing) (`-a`)
- *  - Scheduling algorithm (`-s`)
- *  - Input file or random burst generation (`-i` or `-r`)
- *  - Output mode (`-m`), controlling the verbosity of printed output
- *
- * Key Features:
- * - Simulates process arrival and execution as bursts with interarrival times.
- * - Each processor operates in its own thread, synchronizing access to queues using mutex locks and condition variables.
- * - Output can be controlled to print varying levels of detail about the simulation.
- * - At the end, the program prints a summary with average turnaround time for all processed bursts.
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -37,6 +9,10 @@
 // Constants for queue scheduling methods in multi-queue
 #define RM 0 // Round-Robin Method
 #define LM 1 // Load-Balancing Method
+
+// Global variables for processors and queue type
+int num_processors;
+int is_multi_queue;
 
 // Define scheduling algorithms
 typedef enum
@@ -92,11 +68,13 @@ volatile int simulation_running = 1; // Flag to control simulation loop
 pthread_t *processor_threads;
 
 // Variables for single and multi-queue scheduling
-queue_t *ready_queue;            // Single ready queue (for single-queue scheduling)
-queue_t **processor_queues;      // Array of queues for multi-queue scheduling
-int *processor_loads;            // Array to track load for each processor's queue
-pthread_mutex_t *queue_locks;    // Array of locks (one per queue)
-pthread_cond_t *queue_not_empty; // Condition variables (one per queue)
+queue_t *ready_queue;                  // Single ready queue (for single-queue scheduling)
+queue_t **processor_queues;            // Array of queues for multi-queue scheduling
+int *processor_loads;                  // Array to track load for each processor's queue
+pthread_mutex_t *queue_locks;          // Array of locks (one per queue for multi-queue)
+pthread_cond_t *queue_not_empty;       // Array of condition variables (one per queue for multi-queue)
+pthread_mutex_t queue_lock;            // Single lock for the single-queue approach
+pthread_cond_t single_queue_not_empty; // Condition variable for single-queue approach
 
 /*
  * init_simulation_time:
@@ -184,23 +162,6 @@ void free_queue(queue_t *queue)
 }
 
 /*
- * generate_random_time:
- * Generates a random time using an exponential distribution, clamped to [min, max].
- * Used to simulate interarrival times and burst lengths when generating random bursts.
- */
-int generate_random_time(int mean, int min, int max)
-{
-    double lambda = 1.0 / mean; // Rate for exponential distribution
-    int random_time;
-    do
-    {
-        double u = (double)rand() / RAND_MAX;
-        random_time = (int)(-log(1.0 - u) / lambda);
-    } while (random_time < min || random_time > max); // Ensure within range
-    return random_time;
-}
-
-/*
  * parse_arguments:
  * Parses command-line arguments and populates the arguments structure.
  * Returns 1 on success, 0 on failure.
@@ -246,7 +207,7 @@ int parse_arguments(int argc, char *argv[], arguments *args)
  * Allocates and initializes queues, locks, and condition variables for each processor
  * in multi-queue scheduling mode.
  */
-void initialize_multi_queues(int num_processors)
+void initialize_multi_queues()
 {
     processor_queues = malloc(num_processors * sizeof(queue_t *));
     processor_loads = malloc(num_processors * sizeof(int));
@@ -326,7 +287,7 @@ void *processor_thread_function(void *arg)
             pthread_mutex_lock(&queue_lock);
             while (is_queue_empty(ready_queue) && simulation_running)
             {
-                pthread_cond_wait(&queue_not_empty, &queue_lock);
+                pthread_cond_wait(&single_queue_not_empty, &queue_lock);
             }
             burst = dequeue(ready_queue);
             pthread_mutex_unlock(&queue_lock);
@@ -348,7 +309,7 @@ void *processor_thread_function(void *arg)
  * create_processor_threads:
  * Creates a separate thread for each processor to process bursts from its queue.
  */
-void create_processor_threads(int num_processors, scheduling_algorithm algo)
+void create_processor_threads()
 {
     processor_threads = malloc(num_processors * sizeof(pthread_t));
     for (int i = 0; i < num_processors; i++)
@@ -401,21 +362,25 @@ int main(int argc, char *argv[])
     if (!parse_arguments(argc, argv, &args))
         return EXIT_FAILURE;
 
+    num_processors = args.num_processors;
+    is_multi_queue = args.multi_queue;
     outmode = args.outmode;
     init_simulation_time();
 
     // Initialize single or multi-queue setup based on arguments
-    if (args.multi_queue)
+    if (is_multi_queue)
     {
-        initialize_multi_queues(args.num_processors);
+        initialize_multi_queues();
     }
     else
     {
         ready_queue = create_queue();
+        pthread_mutex_init(&queue_lock, NULL);
+        pthread_cond_init(&single_queue_not_empty, NULL);
     }
 
     // Start processor threads
-    create_processor_threads(args.num_processors, args.scheduling_algo);
+    create_processor_threads();
 
     // Add workload reading and generation logic here...
     // Note: This requires adding file reading or random generation for bursts.
