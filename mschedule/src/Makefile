@@ -1,6 +1,7 @@
 # Compiler and flags
 CC = gcc
-CFLAGS = -Wall -pthread -lm
+CFLAGS = -Wall -pthread
+LDFLAGS = -lm
 TARGET = mschedule
  
 # Source files
@@ -14,7 +15,7 @@ all: $(TARGET)
 
 # Rule to build the executable
 $(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS)
+	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS) $(LDFLAGS)
 
 # Rule to generate object files from source files
 %.o: %.c

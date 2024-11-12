@@ -5,6 +5,7 @@
 #include <string.h>
 #include <sys/time.h>
 #include <math.h>
+#include <time.h>
 
 // Constants for queue scheduling methods in multi-queue
 #define RM 0 // Round-Robin Method
@@ -68,13 +69,31 @@ volatile int simulation_running = 1; // Flag to control simulation loop
 pthread_t *processor_threads;
 
 // Variables for single and multi-queue scheduling
-queue_t *ready_queue;                  // Single ready queue (for single-queue scheduling)
-queue_t **processor_queues;            // Array of queues for multi-queue scheduling
-int *processor_loads;                  // Array to track load for each processor's queue
-pthread_mutex_t *queue_locks;          // Array of locks (one per queue for multi-queue)
-pthread_cond_t *queue_not_empty;       // Array of condition variables (one per queue for multi-queue)
-pthread_mutex_t queue_lock;            // Single lock for the single-queue approach
-pthread_cond_t single_queue_not_empty; // Condition variable for single-queue approach
+queue_t *ready_queue = NULL;            // Single ready queue (for single-queue scheduling)
+queue_t **processor_queues = NULL;      // Array of queues for multi-queue scheduling
+int *processor_loads = NULL;            // Array to track load for each processor's queue
+pthread_mutex_t *queue_locks = NULL;    // Array of locks (one per queue for multi-queue)
+pthread_cond_t *queue_not_empty = NULL; // Array of condition variables (one per queue for multi-queue)
+pthread_mutex_t queue_lock;             // Single lock for the single-queue approach
+pthread_cond_t single_queue_not_empty;  // Condition variable for single-queue approach
+
+// Function declarations to organize code better
+void init_simulation_time();
+long get_current_time();
+int parse_arguments(int argc, char *argv[], arguments *args);
+int generate_random_time(int mean, int min, int max);
+queue_t *create_queue();
+void enqueue(queue_t *queue, burst_t *burst);
+burst_t *dequeue(queue_t *queue);
+int is_queue_empty(queue_t *queue);
+void free_queue(queue_t *queue);
+void initialize_multi_queues();
+void add_burst_to_queue(burst_t *burst, int method);
+void *processor_thread_function(void *arg);
+void create_processor_threads();
+void wait_for_threads_to_finish();
+void cleanup();
+void print_summary(burst_t **completed_bursts, int burst_count);
 
 /*
  * init_simulation_time:
@@ -85,6 +104,8 @@ void init_simulation_time()
     struct timeval tv;
     gettimeofday(&tv, NULL);
     simulation_start_time = tv.tv_sec * 1000 + tv.tv_usec / 1000;
+    if (outmode == 3)
+        printf("Simulation start time initialized to %ld ms\n", simulation_start_time);
 }
 
 /*
@@ -110,6 +131,8 @@ queue_t *create_queue()
 {
     queue_t *queue = malloc(sizeof(queue_t));
     queue->head = queue->tail = NULL;
+    if (outmode == 3)
+        printf("Queue created\n");
     return queue;
 }
 
@@ -127,6 +150,8 @@ void enqueue(queue_t *queue, burst_t *burst)
         queue->head = new_node;
     }
     queue->tail = new_node;
+    if (outmode == 3)
+        printf("Enqueued burst with PID %d and length %d ms\n", burst->pid, burst->length);
 }
 
 burst_t *dequeue(queue_t *queue)
@@ -141,6 +166,8 @@ burst_t *dequeue(queue_t *queue)
         queue->tail = NULL;
     }
     free(old_head);
+    if (outmode == 3)
+        printf("Dequeued burst with PID %d\n", burst->pid);
     return burst;
 }
 
@@ -155,6 +182,10 @@ void free_queue(queue_t *queue)
     while (current)
     {
         node_t *next = current->next;
+        if (current->burst != NULL)
+        {
+            free(current->burst);
+        }
         free(current);
         current = next;
     }
@@ -199,7 +230,26 @@ int parse_arguments(int argc, char *argv[], arguments *args)
             args->PC = atoi(argv[++i]);
         }
     }
+    printf("Parsed arguments: num_processors = %d, multi_queue = %d, scheduling_algo = %d, outmode = %d\n",
+           args->num_processors, args->multi_queue, args->scheduling_algo, args->outmode);
     return 1;
+}
+
+/*
+ * generate_random_time:
+ * Generates a random time using an exponential distribution, clamped to [min, max].
+ * Used to simulate interarrival times and burst lengths when generating random bursts.
+ */
+int generate_random_time(int mean, int min, int max)
+{
+    double lambda = 1.0 / mean; // Rate for exponential distribution
+    int random_time;
+    do
+    {
+        double u = (double)rand() / RAND_MAX;
+        random_time = (int)(-log(1.0 - u) / lambda);
+    } while (random_time < min || random_time > max); // Ensure within range
+    return random_time;
 }
 
 /*
@@ -259,7 +309,6 @@ void *processor_thread_function(void *arg)
 {
     int processor_id = *((int *)arg); // Get processor ID
     free(arg);                        // Free dynamically allocated processor_id
-    scheduling_algorithm algo = FCFS;
 
     while (simulation_running)
     {
@@ -293,13 +342,19 @@ void *processor_thread_function(void *arg)
             pthread_mutex_unlock(&queue_lock);
         }
 
-        // Simulate burst processing (sleep), record timing information
         if (burst)
         {
+            if (outmode >= 2)
+                printf("time=%ld, cpu=%d, pid=%d, burstlen=%d\n", get_current_time(), processor_id, burst->pid, burst->length);
+
             burst->finish_time = get_current_time();
-            usleep(burst->length * 1000);
+            usleep(burst->length * 1000); // Simulate processing
             burst->turnaround_time = burst->finish_time - burst->arrival_time;
             burst->waiting_time = burst->turnaround_time - burst->length;
+
+            if (outmode == 3)
+                printf("Burst with PID %d finished on CPU %d\n", burst->pid, processor_id);
+            free(burst); // Free burst after processing
         }
     }
     return NULL;
@@ -317,6 +372,8 @@ void create_processor_threads()
         int *id = malloc(sizeof(int));
         *id = i;
         pthread_create(&processor_threads[i], NULL, processor_thread_function, id);
+        if (outmode == 3)
+            printf("Created thread for processor %d\n", i);
     }
 }
 
@@ -329,6 +386,8 @@ void wait_for_threads_to_finish()
     for (int i = 0; i < num_processors; i++)
     {
         pthread_join(processor_threads[i], NULL);
+        if (outmode == 3)
+            printf("Joined thread for processor %d\n", i);
     }
 }
 
@@ -338,17 +397,29 @@ void wait_for_threads_to_finish()
  */
 void cleanup()
 {
-    free(processor_threads);
-    for (int i = 0; i < num_processors; i++)
+    if (processor_threads)
+        free(processor_threads);
+    if (ready_queue)
     {
-        free_queue(processor_queues[i]);
-        pthread_mutex_destroy(&queue_locks[i]);
-        pthread_cond_destroy(&queue_not_empty[i]);
+        free_queue(ready_queue);
+        pthread_mutex_destroy(&queue_lock);
+        pthread_cond_destroy(&single_queue_not_empty);
     }
-    free(processor_queues);
-    free(processor_loads);
-    free(queue_locks);
-    free(queue_not_empty);
+
+    if (processor_queues)
+    {
+        for (int i = 0; i < num_processors; i++)
+        {
+            if (processor_queues[i])
+                free_queue(processor_queues[i]);
+            pthread_mutex_destroy(&queue_locks[i]);
+            pthread_cond_destroy(&queue_not_empty[i]);
+        }
+        free(processor_queues);
+        free(processor_loads);
+        free(queue_locks);
+        free(queue_not_empty);
+    }
 }
 
 /*
@@ -382,8 +453,49 @@ int main(int argc, char *argv[])
     // Start processor threads
     create_processor_threads();
 
-    // Add workload reading and generation logic here...
-    // Note: This requires adding file reading or random generation for bursts.
+    // Generate bursts if random generation is specified
+    if (args.random_generation)
+    {
+        srand(time(NULL)); // Seed the random number generator
+
+        for (int i = 0; i < args.PC; i++)
+        {
+            burst_t *new_burst = malloc(sizeof(burst_t));
+            new_burst->pid = i;
+            new_burst->arrival_time = get_current_time();
+            new_burst->length = generate_random_time(args.T, args.L1, args.L2);
+            new_burst->next = NULL;
+
+            // Enqueue the burst based on queue type
+            if (is_multi_queue)
+            {
+                add_burst_to_queue(new_burst, RM); // Use Round-Robin
+            }
+            else
+            {
+                pthread_mutex_lock(&queue_lock);
+                enqueue(ready_queue, new_burst);
+                pthread_cond_signal(&single_queue_not_empty);
+                pthread_mutex_unlock(&queue_lock);
+            }
+
+            usleep(generate_random_time(args.T, args.T1, args.T2) * 1000); // Simulate interarrival time
+        }
+    }
+
+    // Allow simulation to end once all bursts are processed
+    simulation_running = 0;
+    if (is_multi_queue)
+    {
+        for (int i = 0; i < num_processors; i++)
+        {
+            pthread_cond_broadcast(&queue_not_empty[i]);
+        }
+    }
+    else
+    {
+        pthread_cond_broadcast(&single_queue_not_empty);
+    }
 
     // Wait for all threads to complete processing
     wait_for_threads_to_finish();
