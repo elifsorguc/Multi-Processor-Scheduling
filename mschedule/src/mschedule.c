@@ -175,6 +175,17 @@ void enqueue(queue_t *queue, burst_t *burst)
     queue->tail = new_node;
     if (outmode == 3)
         fprintf(outfile,"time=%ld, Added burst to queue, pid=%d, burstlen=%d\n", get_current_time(), burst->pid, burst->length);
+
+    // Signal waiting threads that a new burst has been added
+    if (is_multi_queue) {
+        // Broadcast to the condition variable specific to the processor's queue
+        for (int i = 0; i < num_processors; i++) {
+            pthread_cond_signal(&queue_not_empty[i]);
+        }
+    } else {
+        // For single queue, signal the single queue's condition variable
+        pthread_cond_signal(&single_queue_not_empty);
+    }    
 }
 
 // Function to initialize the selected scheduling algorithm
@@ -435,34 +446,31 @@ void *processor_thread_function(void *arg)
         burst_t *burst = NULL;
 
         // Pick burst from the appropriate queue
-        if (is_multi_queue)
-        {
+        if (is_multi_queue) {
             pthread_mutex_lock(&queue_locks[processor_id]);
-            while (is_queue_empty(processor_queues[processor_id]) && simulation_running)
-            {
+            while (is_queue_empty(processor_queues[processor_id]) && simulation_running) {
                 pthread_cond_wait(&queue_not_empty[processor_id], &queue_locks[processor_id]);
             }
-            if (!simulation_running)
-            {
+
+            // Exit if no more bursts to process and simulation is complete
+            if (!simulation_running && is_queue_empty(processor_queues[processor_id])) {
                 pthread_mutex_unlock(&queue_locks[processor_id]);
                 break;
             }
+
             burst = dequeue(processor_queues[processor_id]);
-            processor_loads[processor_id] -= burst->length;
             pthread_mutex_unlock(&queue_locks[processor_id]);
-        }
-        else
-        {
+        } else {
             pthread_mutex_lock(&queue_lock);
-            while (is_queue_empty(ready_queue) && simulation_running)
-            {
+            while (is_queue_empty(ready_queue) && simulation_running) {
                 pthread_cond_wait(&single_queue_not_empty, &queue_lock);
             }
-            if (!simulation_running)
-            {
+
+            if (!simulation_running && is_queue_empty(ready_queue)) {
                 pthread_mutex_unlock(&queue_lock);
                 break;
             }
+
             burst = dequeue(ready_queue);
             pthread_mutex_unlock(&queue_lock);
         }
