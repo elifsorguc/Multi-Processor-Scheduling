@@ -7,6 +7,8 @@
 #include <math.h>
 #include <time.h>
 
+#define MAX_BURSTS 1000  
+FILE *outfile = NULL;
 // Constants for queue scheduling methods in multi-queue
 #define RM 0 // Round-Robin Method
 #define LM 1 // Load-Balancing Method
@@ -99,6 +101,7 @@ void *processor_thread_function(void *arg);
 void create_processor_threads();
 void wait_for_threads_to_finish();
 void cleanup();
+int compare_bursts_by_pid(const void *a, const void *b);
 void print_summary();
 void add_completed_burst(burst_t *burst);
 void read_bursts_from_file(const char *filename);
@@ -109,7 +112,11 @@ burst_t *dequeue_sjf(queue_t *queue);
 // Function to store completed burst
 void add_completed_burst(burst_t *burst)
 {
-    completed_bursts[burst_count++] = burst;
+    if (burst_count < MAX_BURSTS) {
+        completed_bursts[burst_count++] = burst;
+    } else {
+        fprintf(stderr, "Error: Maximum burst count exceeded\n");
+    }
 }
 /*
  * init_simulation_time:
@@ -167,7 +174,7 @@ void enqueue(queue_t *queue, burst_t *burst)
     }
     queue->tail = new_node;
     if (outmode == 3)
-        printf("Enqueued burst with PID %d and length %d ms\n", burst->pid, burst->length);
+        printf("time=%ld, Added burst to queue, pid=%d, burstlen=%d\n", get_current_time(), burst->pid, burst->length);
 }
 
 // Function to initialize the selected scheduling algorithm
@@ -294,21 +301,24 @@ int parse_arguments(int argc, char *argv[], arguments *args)
         fprintf(stderr, "Insufficient arguments.\n");
         return 0;
     }
+
     args->num_processors = atoi(argv[2]);
-    args->multi_queue = (strcmp(argv[4], "M") == 0);                    // Multi-queue if 'M'
-    args->scheduling_algo = (strcmp(argv[6], "SJF") == 0) ? SJF : FCFS; // SJF or FCFS
-    args->outmode = 1;                                                  // Default OUTMODE
+    args->multi_queue = (strcmp(argv[4], "M") == 0);
+    args->scheduling_algo = (strcmp(argv[6], "SJF") == 0) ? SJF : FCFS;
+    args->outmode = 1; // Default OUTMODE
+    char *output_filename = NULL; // Initialize to NULL
+
     for (int i = 7; i < argc; i++)
     {
         if (strcmp(argv[i], "-m") == 0)
         {
             args->outmode = atoi(argv[++i]);
         }
-        if (strcmp(argv[i], "-i") == 0)
+        else if (strcmp(argv[i], "-i") == 0)
         {
             args->input_file = argv[++i];
         }
-        if (strcmp(argv[i], "-r") == 0)
+        else if (strcmp(argv[i], "-r") == 0)
         {
             args->random_generation = 1;
             args->T = atoi(argv[++i]);
@@ -319,9 +329,23 @@ int parse_arguments(int argc, char *argv[], arguments *args)
             args->L2 = atoi(argv[++i]);
             args->PC = atoi(argv[++i]);
         }
+        else if (strcmp(argv[i], "-o") == 0)
+        {
+            output_filename = argv[++i]; // Capture output file name
+        }
     }
+
+    // Open the output file if specified, otherwise use stdout
+    outfile = output_filename ? fopen(output_filename, "w") : stdout;
+    if (!outfile) // Error handling for file open failure
+    {
+        perror("Error opening output file");
+        return 0;
+    }
+
     printf("Parsed arguments: num_processors = %d, multi_queue = %d, scheduling_algo = %d, outmode = %d\n",
            args->num_processors, args->multi_queue, args->scheduling_algo, args->outmode);
+
     return 1;
 }
 
@@ -464,7 +488,7 @@ void *processor_thread_function(void *arg)
             }
 
             if (outmode == 3)
-                printf("Burst with PID %d finished on CPU %d\n", burst->pid, processor_id);
+                printf("time=%ld, Burst finished, cpu=%d, pid=%d\n", get_current_time(), processor_id, burst->pid);
 
             // Store the completed burst for final summary
             add_completed_burst(burst);
@@ -533,24 +557,46 @@ void cleanup()
         free(queue_locks);
         free(queue_not_empty);
     }
+
+    // Close the output file if it's not stdout
+    if (outfile && outfile != stdout)
+    {
+        fclose(outfile);
+    }
+}
+
+
+int compare_bursts_by_pid(const void *a, const void *b)
+{
+    burst_t *burst_a = *(burst_t **)a;
+    burst_t *burst_b = *(burst_t **)b;
+    return burst_a->pid - burst_b->pid;
 }
 
 void print_summary()
 {
     long total_turnaround_time = 0;
 
+    // Sort completed_bursts array by pid before printing
+    qsort(completed_bursts, burst_count, sizeof(burst_t *), compare_bursts_by_pid);
+
     // Print header with fixed-width formatting
-    printf("pid   cpu  burstlen   arv    finish    waitingtime   turnaround\n");
+    fprintf(outfile, "pid   cpu  burstlen   arv    finish    waitingtime   turnaround\n");
+    //printf("pid   cpu  burstlen   arv    finish    waitingtime   turnaround\n");
 
     for (int i = 0; i < burst_count; i++)
     {
         burst_t *burst = completed_bursts[i];
 
         // Adjust the width of each column using field width specifiers
-        printf("%-4d  %-3d  %-9d  %-6ld  %-9ld  %-12ld  %-10ld\n",
+        fprintf(outfile, "%-4d  %-3d  %-9d  %-6ld  %-9ld  %-12ld  %-10ld\n",
+                burst->pid, burst->cpu_id, burst->length, burst->arrival_time,
+                burst->finish_time, burst->waiting_time, burst->turnaround_time);
+
+       /* printf("%-4d  %-3d  %-9d  %-6ld  %-9ld  %-12ld  %-10ld\n",
                burst->pid, burst->cpu_id, burst->length, burst->arrival_time,
                burst->finish_time, burst->waiting_time, burst->turnaround_time);
-
+        */
         total_turnaround_time += burst->turnaround_time;
     }
 
@@ -558,11 +604,13 @@ void print_summary()
     if (burst_count > 0)
     {
         double avg_turnaround_time = (double)total_turnaround_time / burst_count;
-        printf("average turnaround time: %.2f ms\n", avg_turnaround_time);
+        //printf("average turnaround time: %.2f ms\n", avg_turnaround_time);
+        fprintf(outfile, "average turnaround time: %.2f ms\n", avg_turnaround_time);
     }
     else
     {
-        printf("No bursts processed.\n");
+        fprintf(outfile, "No bursts processed.\n");
+        //printf("No bursts processed.\n");
     }
 }
 
@@ -628,8 +676,12 @@ int main(int argc, char *argv[])
     outmode = args.outmode;
     init_simulation_time();
 
-    // Initialize completed bursts array
-    completed_bursts = malloc(args.PC * sizeof(burst_t *));
+    // Initialize completed_bursts array with MAX_BURSTS
+    completed_bursts = malloc(MAX_BURSTS * sizeof(burst_t *));
+    if (!completed_bursts) {
+        perror("Error allocating memory for completed bursts");
+        return EXIT_FAILURE;
+    }
 
     // Set the selected scheduling algorithm
     set_scheduling_algorithm(args.scheduling_algo);
