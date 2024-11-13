@@ -1,4 +1,10 @@
-# Multi-Processor Scheduling Simulator (mschedule)
+### Elif Sorguç - 22003782
+
+### Habibe Yılmaz - 22002766
+
+# Multithreading, Synchronization, and Scheduling
+
+## Multi-Processor Scheduling Simulator (mschedule)
 
 This project is a multi-processor scheduling simulator that supports two approaches: single-queue and multi-queue. It can simulate FCFS and SJF scheduling algorithms using POSIX threads in a C/Linux environment.
 
