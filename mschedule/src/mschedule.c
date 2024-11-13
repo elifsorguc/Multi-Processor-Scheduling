@@ -174,7 +174,7 @@ void enqueue(queue_t *queue, burst_t *burst)
     }
     queue->tail = new_node;
     if (outmode == 3)
-        printf("time=%ld, Added burst to queue, pid=%d, burstlen=%d\n", get_current_time(), burst->pid, burst->length);
+        fprintf(outfile,"time=%ld, Added burst to queue, pid=%d, burstlen=%d\n", get_current_time(), burst->pid, burst->length);
 }
 
 // Function to initialize the selected scheduling algorithm
@@ -472,7 +472,7 @@ void *processor_thread_function(void *arg)
             burst->cpu_id = processor_id; // Track the CPU handling this burst
 
             if (outmode >= 2)
-                printf("time=%ld, cpu=%d, pid=%d, burstlen=%d\n", get_current_time(), processor_id, burst->pid, burst->length);
+                fprintf(outfile,"time=%ld, cpu=%d, pid=%d, burstlen=%d\n", get_current_time(), processor_id, burst->pid, burst->length);
 
             usleep(burst->length * 1000); // Simulate processing
 
@@ -488,7 +488,7 @@ void *processor_thread_function(void *arg)
             }
 
             if (outmode == 3)
-                printf("time=%ld, Burst finished, cpu=%d, pid=%d\n", get_current_time(), processor_id, burst->pid);
+                fprintf(outfile,"time=%ld, Burst finished, cpu=%d, pid=%d\n", get_current_time(), processor_id, burst->pid);
 
             // Store the completed burst for final summary
             add_completed_burst(burst);
