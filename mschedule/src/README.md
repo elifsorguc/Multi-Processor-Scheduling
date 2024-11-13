@@ -10,12 +10,18 @@ This project is a multi-processor scheduling simulator that supports two approac
 
 ## Usage
 
-#### What is included?
+#### What is included and how to run
 
-mschedule.c file contains the main and all needed functions.
-Eample inputfile.txt is included, you can try with different same format input files.
-Makefile to crate executable.
-to create executable file just use command:
-_make_
-To run the simulator, use the following command format:
-_./mschedule -n N -a S/M QS -s FCFS/SJF [-i INFILE | -r T T1 T2 L L1 L2 PC] [-m OUTMODE]_
+##### mschedule.c file contains the main and all needed functions.
+
+##### Eample inputfile.txt is included, you can try with different same format input files.
+
+##### Makefile to crate executable.
+
+##### to create executable file just use command:
+
+##### _make_
+
+##### To run the simulator, use the following command format:
+
+##### _./mschedule -n N -a S/M QS -s FCFS/SJF [-i INFILE | -r T T1 T2 L L1 L2 PC] [-m OUTMODE]_
