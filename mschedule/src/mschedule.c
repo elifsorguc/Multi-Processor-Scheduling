@@ -7,121 +7,120 @@
 #include <math.h>
 #include <time.h>
 
-#define MAX_BURSTS 1000  
+#define MAX_BURSTS 1000
 FILE *outfile = NULL;
-// Constants for queue scheduling methods in multi-queue
-#define RM 0 // Round-Robin Method
-#define LM 1 // Load-Balancing Method
+// 1 for Round Robin 0 for load balancing for queue scheduling methods in multi-queue
+#define RM 0
+#define LM 1
 
-// Global variables for processors and queue type
 int num_processors;
 int is_multi_queue;
 
-// Define scheduling algorithms
+// scheduling algorithms
 typedef enum
 {
-    FCFS, // First-Come, First-Served
-    SJF   // Shortest Job First (non-preemptive)
+    FCFS,
+    SJF
 } scheduling_algorithm;
 
 scheduling_algorithm selected_algorithm;
 
-// Structure to represent a burst (process) to be handled by a processor
+// burst (process)
 typedef struct burst
 {
-    int pid;              // Process ID
-    int cpu_id;           // CPU ID (processor) that handled this burst
-    int length;           // Burst length in ms (execution time)
-    long arrival_time;    // Time when burst arrives in the system
-    long finish_time;     // Time when burst completes execution
+    int pid;
+    int cpu_id;
+    int length;
+    long arrival_time;
+    long finish_time;
     long turnaround_time; // Turnaround time = finish_time - arrival_time
     long waiting_time;    // Waiting time = turnaround_time - length
-    struct burst *next;   // Pointer to next burst (for linked list in queue)
+    struct burst *next;   // ptr to next burst
 } burst_t;
 
-// Queue structures to manage bursts
+// queue to manage bursts
 typedef struct node
 {
-    burst_t *burst;    // Burst stored in this node
-    struct node *next; // Pointer to the next node in the queue
+    burst_t *burst;    // burst stored in this node
+    struct node *next; // ptr to the next node
 } node_t;
 
 typedef struct queue
 {
-    node_t *head; // Head (front) of the queue
-    node_t *tail; // Tail (end) of the queue
+    node_t *head;
+    node_t *tail;
 } queue_t;
 
-// Structure for storing parsed command-line arguments
+// command-line arguments to parse
 typedef struct arguments
 {
-    int num_processors;                   // Number of processors
-    int multi_queue;                      // 1 if multi-queue, 0 if single queue
-    scheduling_algorithm scheduling_algo; // Selected scheduling algorithm
-    char *input_file;                     // Input file name, if provided
-    int random_generation;                // 1 if generating random bursts
-    int T, T1, T2, L, L1, L2, PC;         // Parameters for random generation
-    int outmode;                          // Output mode (1, 2, or 3)
+    int num_processors;
+    int multi_queue; // 1 if multi-queue, 0 if single queue
+    scheduling_algorithm scheduling_algo;
+    char *input_file;             // input file name (optional*)
+    int random_generation;        // 1 if generating random bursts (optional*)
+    int T, T1, T2, L, L1, L2, PC; // Parameters for random generation (optional*)
+    int outmode;                  // Output mode (1, 2, or 3)
 } arguments;
 
-// Global variables for tracking time and controlling the simulation
-long simulation_start_time;          // Start time of the simulation (in ms)
-int outmode;                         // Output mode specified in arguments
-volatile int simulation_running = 1; // Flag to control simulation loop
+long simulation_start_time; // ms
+int outmode;
+volatile int simulation_running = 1; // flag to control simulation loop
 
-// Variables for processor threads
 pthread_t *processor_threads;
 
-// Variables for single and multi-queue scheduling
-queue_t *ready_queue = NULL;            // Single ready queue (for single-queue scheduling)
-queue_t **processor_queues = NULL;      // Array of queues for multi-queue scheduling
-int *processor_loads = NULL;            // Array to track load for each processor's queue
-pthread_mutex_t *queue_locks = NULL;    // Array of locks (one per queue for multi-queue)
-pthread_cond_t *queue_not_empty = NULL; // Array of condition variables (one per queue for multi-queue)
-pthread_mutex_t queue_lock;             // Single lock for the single-queue approach
-pthread_cond_t single_queue_not_empty;  // Condition variable for single-queue approach
+// single and multi-queue scheduling
+queue_t *ready_queue = NULL;            // Single ready queue (for single-queue)
+queue_t **processor_queues = NULL;      // queues for multi-queue scheduling
+int *processor_loads = NULL;            // track load for each processor's queue
+pthread_mutex_t *queue_locks = NULL;    // locks (one per queue for multi-queue)
+pthread_cond_t *queue_not_empty = NULL; // condition variables (one per queue for multi-queue)
+pthread_mutex_t queue_lock;             // single-queue lock
+pthread_cond_t single_queue_not_empty;  // single-queue cv
 
 burst_t **completed_bursts;
 int burst_count = 0;
 
-// Function declarations to organize code better
 void init_simulation_time();
 long get_current_time();
 int parse_arguments(int argc, char *argv[], arguments *args);
 int generate_random_time(int mean, int min, int max);
+
 queue_t *create_queue();
 void enqueue(queue_t *queue, burst_t *burst);
 burst_t *dequeue(queue_t *queue);
-
 int is_queue_empty(queue_t *queue);
 void free_queue(queue_t *queue);
 void initialize_multi_queues();
 void add_burst_to_queue(burst_t *burst, int method);
+
 void *processor_thread_function(void *arg);
 void create_processor_threads();
 void wait_for_threads_to_finish();
-void cleanup();
-int compare_bursts_by_pid(const void *a, const void *b);
+
 void print_summary();
+void cleanup();
+
+int compare_bursts_by_pid(const void *a, const void *b);
 void add_completed_burst(burst_t *burst);
 void read_bursts_from_file(const char *filename);
-
 burst_t *dequeue_fcfs(queue_t *queue);
 burst_t *dequeue_sjf(queue_t *queue);
 
-// Function to store completed burst
+// to store completed burst
 void add_completed_burst(burst_t *burst)
 {
-    if (burst_count < MAX_BURSTS) {
+    if (burst_count < MAX_BURSTS)
+    {
         completed_bursts[burst_count++] = burst;
-    } else {
+    }
+    else
+    {
         fprintf(stderr, "Error: Maximum burst count exceeded\n");
     }
 }
-/*
- * init_simulation_time:
- * Initializes the simulation start time by recording the current time in milliseconds.
- */
+
+// simulation start time by recording the current time in ms
 void init_simulation_time()
 {
     struct timeval tv;
@@ -131,10 +130,7 @@ void init_simulation_time()
         printf("Simulation start time initialized to %ld ms\n", simulation_start_time);
 }
 
-/*
- * get_current_time:
- * Returns the elapsed time in milliseconds since the simulation started.
- */
+// elapsed time in ms since start
 long get_current_time()
 {
     struct timeval tv;
@@ -174,27 +170,30 @@ void enqueue(queue_t *queue, burst_t *burst)
     }
     queue->tail = new_node;
     if (outmode == 3)
-        fprintf(outfile,"time=%ld, Added burst to queue, pid=%d, burstlen=%d\n", get_current_time(), burst->pid, burst->length);
+        fprintf(outfile, "time=%ld, Added burst to queue, pid=%d, burstlen=%d\n", get_current_time(), burst->pid, burst->length);
 
-    // Signal waiting threads that a new burst has been added
-    if (is_multi_queue) {
-        // Broadcast to the condition variable specific to the processor's queue
-        for (int i = 0; i < num_processors; i++) {
+    // signal waiting threads that a new burst has been added
+    if (is_multi_queue)
+    {
+        // broadcast to the cv specific to the processor's queue
+        for (int i = 0; i < num_processors; i++)
+        {
             pthread_cond_signal(&queue_not_empty[i]);
         }
-    } else {
-        // For single queue, signal the single queue's condition variable
+    }
+    else
+    {
+        // !single queue - signal the single queue's cv
         pthread_cond_signal(&single_queue_not_empty);
-    }    
+    }
 }
 
-// Function to initialize the selected scheduling algorithm
 void set_scheduling_algorithm(scheduling_algorithm algo)
 {
     selected_algorithm = algo;
 }
 
-// Modified dequeue function to handle both FCFS and SJF
+// dequeue function to handle both FCFS and SJF
 burst_t *dequeue(queue_t *queue)
 {
     if (selected_algorithm == FCFS)
@@ -208,7 +207,7 @@ burst_t *dequeue(queue_t *queue)
     return NULL;
 }
 
-// FCFS dequeue - simply removes the burst at the head of the queue
+// FCFS dequeue - removes the head
 burst_t *dequeue_fcfs(queue_t *queue)
 {
     if (queue->head == NULL)
@@ -222,7 +221,7 @@ burst_t *dequeue_fcfs(queue_t *queue)
     return burst;
 }
 
-// SJF dequeue - finds the shortest burst in the queue and removes it
+// SJF dequeue - finds the shortest burst and removes it
 burst_t *dequeue_sjf(queue_t *queue)
 {
     if (queue->head == NULL)
@@ -234,13 +233,13 @@ burst_t *dequeue_sjf(queue_t *queue)
     node_t *shortest_prev = NULL;
     node_t *current = queue->head;
     node_t *shortest_node = NULL;
-    long current_time = get_current_time(); // Get the current simulation time
+    long current_time = get_current_time();
 
-    // Traverse the queue to find the shortest burst that has already arrived
+    // to find the shortest burst that already ***arrived***
     while (current != NULL)
     {
         if (current->burst->arrival_time <= current_time)
-        { // Check if burst has arrived
+        { // check
             if (shortest_node == NULL || current->burst->length < shortest_node->burst->length)
             {
                 shortest_prev = prev;
@@ -251,13 +250,13 @@ burst_t *dequeue_sjf(queue_t *queue)
         current = current->next;
     }
 
-    // If no bursts have arrived yet, return NULL
+    // no bursts
     if (shortest_node == NULL)
     {
         return NULL;
     }
 
-    // Remove the shortest node from the queue
+    // remove the shortest
     burst_t *burst = shortest_node->burst;
     if (shortest_node == queue->head)
     {
@@ -300,11 +299,7 @@ void free_queue(queue_t *queue)
     free(queue);
 }
 
-/*
- * parse_arguments:
- * Parses command-line arguments and populates the arguments structure.
- * Returns 1 on success, 0 on failure.
- */
+// 1 on success, 0 on failure.
 int parse_arguments(int argc, char *argv[], arguments *args)
 {
     if (argc < 5)
@@ -312,12 +307,12 @@ int parse_arguments(int argc, char *argv[], arguments *args)
         fprintf(stderr, "Insufficient arguments.\n");
         return 0;
     }
-
+    // defaults and assignments
     args->num_processors = atoi(argv[2]);
     args->multi_queue = (strcmp(argv[4], "M") == 0);
     args->scheduling_algo = (strcmp(argv[6], "SJF") == 0) ? SJF : FCFS;
-    args->outmode = 1; // Default OUTMODE
-    char *output_filename = NULL; // Initialize to NULL
+    args->outmode = 1;
+    char *output_filename = NULL;
 
     for (int i = 7; i < argc; i++)
     {
@@ -342,13 +337,12 @@ int parse_arguments(int argc, char *argv[], arguments *args)
         }
         else if (strcmp(argv[i], "-o") == 0)
         {
-            output_filename = argv[++i]; // Capture output file name
+            output_filename = argv[++i];
         }
     }
 
-    // Open the output file if specified, otherwise use stdout
     outfile = output_filename ? fopen(output_filename, "w") : stdout;
-    if (!outfile) // Error handling for file open failure
+    if (!outfile)
     {
         perror("Error opening output file");
         return 0;
@@ -360,34 +354,27 @@ int parse_arguments(int argc, char *argv[], arguments *args)
     return 1;
 }
 
-/*
- * generate_random_time:
- * Generates a random time using an exponential distribution, clamped to [min, max].
- * Used to simulate interarrival times and burst lengths when generating random bursts.
- */
+// generate_random_time:
+// Generates a random time using an exponential distribution, clamped to [min, max].
+// Used to simulate interarrival times and burst lengths when generating random bursts.
 int generate_random_time(int mean, int min, int max)
 {
     if (min > max)
-    { // Ensure min and max are in the correct order
+    {
         int temp = min;
         min = max;
         max = temp;
     }
-    double lambda = 1.0 / mean; // Rate for exponential distribution
+    double lambda = 1.0 / mean; // rate for exponential distribution
     int random_time;
     do
     {
         double u = (double)rand() / RAND_MAX;
         random_time = (int)(-log(1.0 - u) / lambda);
-    } while (random_time < min || random_time > max); // Ensure within range
+    } while (random_time < min || random_time > max);
     return random_time;
 }
 
-/*
- * initialize_multi_queues:
- * Allocates and initializes queues, locks, and condition variables for each processor
- * in multi-queue scheduling mode.
- */
 void initialize_multi_queues()
 {
     processor_queues = malloc(num_processors * sizeof(queue_t *));
@@ -403,12 +390,10 @@ void initialize_multi_queues()
     }
 }
 
-/*
- * add_burst_to_queue:
- * Adds a burst to a processor's queue based on the selected queue management method.
- * - Round-Robin: Adds to processors in a round-robin sequence.
- * - Load-Balancing: Adds to the processor with the least current load.
- */
+// add_burst_to_queue
+// Adds a burst to a processor's queue based on the selected queue management method.
+// Round-Robin -> Adds to processors in a round-robin sequence.
+// Load-Balancing -> Adds to the processor with the least current load.
 void add_burst_to_queue(burst_t *burst, int method)
 {
     static int rr_index = 0;
@@ -423,7 +408,7 @@ void add_burst_to_queue(burst_t *burst, int method)
             }
         }
     }
-    // Lock queue, add burst, update load, signal waiting threads
+    // lock queue, add burst, update load, signal waiting threads
     pthread_mutex_lock(&queue_locks[target_queue]);
     enqueue(processor_queues[target_queue], burst);
     processor_loads[target_queue] += burst->length;
@@ -431,42 +416,45 @@ void add_burst_to_queue(burst_t *burst, int method)
     pthread_mutex_unlock(&queue_locks[target_queue]);
 }
 
-/*
- * processor_thread_function:
- * Simulates burst execution by each processor. Each processor picks a burst from its queue,
- * executes it by sleeping, records the timing metrics, and continues until all bursts are processed.
- */
+// processor_thread_function
+// burst execution by each processor.
+// Each processor picks a burst from its queue executes it by sleeping
 void *processor_thread_function(void *arg)
 {
-    int processor_id = *((int *)arg); // Get processor ID
-    free(arg);                        // Free dynamically allocated processor_id
-
+    int processor_id = *((int *)arg);
+    free(arg);
     while (simulation_running)
     {
         burst_t *burst = NULL;
 
-        // Pick burst from the appropriate queue
-        if (is_multi_queue) {
+        // find burst from the selected queue
+        if (is_multi_queue)
+        {
             pthread_mutex_lock(&queue_locks[processor_id]);
-            while (is_queue_empty(processor_queues[processor_id]) && simulation_running) {
+            while (is_queue_empty(processor_queues[processor_id]) && simulation_running)
+            {
                 pthread_cond_wait(&queue_not_empty[processor_id], &queue_locks[processor_id]);
             }
 
-            // Exit if no more bursts to process and simulation is complete
-            if (!simulation_running && is_queue_empty(processor_queues[processor_id])) {
+            if (!simulation_running && is_queue_empty(processor_queues[processor_id]))
+            {
                 pthread_mutex_unlock(&queue_locks[processor_id]);
                 break;
             }
 
             burst = dequeue(processor_queues[processor_id]);
             pthread_mutex_unlock(&queue_locks[processor_id]);
-        } else {
+        }
+        else
+        {
             pthread_mutex_lock(&queue_lock);
-            while (is_queue_empty(ready_queue) && simulation_running) {
+            while (is_queue_empty(ready_queue) && simulation_running)
+            {
                 pthread_cond_wait(&single_queue_not_empty, &queue_lock);
             }
 
-            if (!simulation_running && is_queue_empty(ready_queue)) {
+            if (!simulation_running && is_queue_empty(ready_queue))
+            {
                 pthread_mutex_unlock(&queue_lock);
                 break;
             }
@@ -477,38 +465,35 @@ void *processor_thread_function(void *arg)
 
         if (burst)
         {
-            burst->cpu_id = processor_id; // Track the CPU handling this burst
+            burst->cpu_id = processor_id;
 
             if (outmode >= 2)
-                fprintf(outfile,"time=%ld, cpu=%d, pid=%d, burstlen=%d\n", get_current_time(), processor_id, burst->pid, burst->length);
+                fprintf(outfile, "time=%ld, cpu=%d, pid=%d, burstlen=%d\n", get_current_time(), processor_id, burst->pid, burst->length);
 
-            usleep(burst->length * 1000); // Simulate processing
+            usleep(burst->length * 1000); // simulate processing by sleeping
 
-            // Assign finish time after the burst is processed
+            // assign finish time after the burst is processed
             burst->finish_time = get_current_time();
             burst->turnaround_time = burst->finish_time - burst->arrival_time;
             burst->waiting_time = burst->turnaround_time - burst->length;
 
-            // Error checking for invalid turnaround or waiting time
+            // error checking for invalid turnaround or waiting time
             if (burst->turnaround_time < 0 || burst->waiting_time < 0)
             {
                 printf("Error: Invalid turnaround or waiting time for PID %d\n", burst->pid);
             }
 
             if (outmode == 3)
-                fprintf(outfile,"time=%ld, Burst finished, cpu=%d, pid=%d\n", get_current_time(), processor_id, burst->pid);
+                fprintf(outfile, "time=%ld, Burst finished, cpu=%d, pid=%d\n", get_current_time(), processor_id, burst->pid);
 
-            // Store the completed burst for final summary
+            // keep the completed burst for final summary****
             add_completed_burst(burst);
         }
     }
     return NULL;
 }
 
-/*
- * create_processor_threads:
- * Creates a separate thread for each processor to process bursts from its queue.
- */
+// Creates a separate thread for each processor to process bursts from its queue.
 void create_processor_threads()
 {
     processor_threads = malloc(num_processors * sizeof(pthread_t));
@@ -522,10 +507,6 @@ void create_processor_threads()
     }
 }
 
-/*
- * wait_for_threads_to_finish:
- * Waits for all processor threads to complete processing.
- */
 void wait_for_threads_to_finish()
 {
     for (int i = 0; i < num_processors; i++)
@@ -536,10 +517,7 @@ void wait_for_threads_to_finish()
     }
 }
 
-/*
- * cleanup:
- * Cleans up resources by freeing memory and destroying mutexes and condition variables.
- */
+// freeing memory and destroying mutexes and condition variables.
 void cleanup()
 {
     if (processor_threads)
@@ -566,13 +544,11 @@ void cleanup()
         free(queue_not_empty);
     }
 
-    // Close the output file if it's not stdout
     if (outfile && outfile != stdout)
     {
         fclose(outfile);
     }
 }
-
 
 int compare_bursts_by_pid(const void *a, const void *b)
 {
@@ -585,40 +561,32 @@ void print_summary()
 {
     long total_turnaround_time = 0;
 
-    // Sort completed_bursts array by pid before printing
     qsort(completed_bursts, burst_count, sizeof(burst_t *), compare_bursts_by_pid);
 
-    // Print header with fixed-width formatting
     fprintf(outfile, "pid   cpu  burstlen   arv    finish    waitingtime   turnaround\n");
-    //printf("pid   cpu  burstlen   arv    finish    waitingtime   turnaround\n");
 
     for (int i = 0; i < burst_count; i++)
     {
         burst_t *burst = completed_bursts[i];
 
-        // Adjust the width of each column using field width specifiers
         fprintf(outfile, "%-4d  %-3d  %-9d  %-6ld  %-9ld  %-12ld  %-10ld\n",
                 burst->pid, burst->cpu_id, burst->length, burst->arrival_time,
                 burst->finish_time, burst->waiting_time, burst->turnaround_time);
 
-       /* printf("%-4d  %-3d  %-9d  %-6ld  %-9ld  %-12ld  %-10ld\n",
-               burst->pid, burst->cpu_id, burst->length, burst->arrival_time,
-               burst->finish_time, burst->waiting_time, burst->turnaround_time);
-        */
         total_turnaround_time += burst->turnaround_time;
     }
 
-    // Avoid NaN by checking if burst_count > 0
+    // avoid NaN by checking if burst_count > 0
     if (burst_count > 0)
     {
         double avg_turnaround_time = (double)total_turnaround_time / burst_count;
-        //printf("average turnaround time: %.2f ms\n", avg_turnaround_time);
+        // printf("average turnaround time: %.2f ms\n", avg_turnaround_time);
         fprintf(outfile, "average turnaround time: %.2f ms\n", avg_turnaround_time);
     }
     else
     {
         fprintf(outfile, "No bursts processed.\n");
-        //printf("No bursts processed.\n");
+        // printf("No bursts processed.\n");
     }
 }
 
@@ -638,17 +606,15 @@ void read_bursts_from_file(const char *filename)
     {
         if (sscanf(line, "PL %d", &burst_length) == 1)
         {
-            // Create a new burst with the specified length
             burst_t *new_burst = malloc(sizeof(burst_t));
             new_burst->pid = pid++;
             new_burst->arrival_time = get_current_time();
             new_burst->length = burst_length;
             new_burst->next = NULL;
 
-            // Enqueue the burst
             if (is_multi_queue)
             {
-                add_burst_to_queue(new_burst, RM); // Use Round-Robin for multi-queue
+                add_burst_to_queue(new_burst, RM); // Round-Robin for multi-queue
             }
             else
             {
@@ -660,7 +626,7 @@ void read_bursts_from_file(const char *filename)
         }
         else if (sscanf(line, "IAT %d", &inter_arrival_time) == 1)
         {
-            // Sleep for the inter-arrival time (simulating arrival delay)
+            // for the inter-arrival time (simulating arrival delay)
             usleep(inter_arrival_time * 1000);
         }
     }
@@ -668,11 +634,6 @@ void read_bursts_from_file(const char *filename)
     fclose(file);
 }
 
-/*
- * main:
- * The main function of the program. Parses command-line arguments, initializes resources,
- * starts processor threads, and manages bursts based on the input file or random generation.
- */
 int main(int argc, char *argv[])
 {
     arguments args;
@@ -684,17 +645,18 @@ int main(int argc, char *argv[])
     outmode = args.outmode;
     init_simulation_time();
 
-    // Initialize completed_bursts array with MAX_BURSTS
+    // completed_bursts array with MAX_BURSTS
     completed_bursts = malloc(MAX_BURSTS * sizeof(burst_t *));
-    if (!completed_bursts) {
+    if (!completed_bursts)
+    {
         perror("Error allocating memory for completed bursts");
         return EXIT_FAILURE;
     }
 
-    // Set the selected scheduling algorithm
+    //  selected scheduling algorithm
     set_scheduling_algorithm(args.scheduling_algo);
 
-    // Initialize queues and threads
+    // queues and threads
     if (is_multi_queue)
     {
         initialize_multi_queues();
@@ -707,7 +669,7 @@ int main(int argc, char *argv[])
     }
     create_processor_threads();
 
-    // Process input file or generate random bursts
+    // input file - generate random bursts
     if (args.input_file)
     {
         read_bursts_from_file(args.input_file);
@@ -738,7 +700,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    // Allow simulation to finish, clean up, and print summary
+    // the end - clean up - print summary
     simulation_running = 0;
     if (is_multi_queue)
     {
