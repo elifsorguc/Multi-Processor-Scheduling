@@ -307,25 +307,99 @@ int parse_arguments(int argc, char *argv[], arguments *args)
         fprintf(stderr, "Insufficient arguments.\n");
         return 0;
     }
-    // defaults and assignments
-    args->num_processors = atoi(argv[2]);
-    args->multi_queue = (strcmp(argv[4], "M") == 0);
-    args->scheduling_algo = (strcmp(argv[6], "SJF") == 0) ? SJF : FCFS;
+
+    // defaults
+    args->num_processors = -1;
+    args->multi_queue = 0;
+    args->scheduling_algo = FCFS;
     args->outmode = 1;
+    args->input_file = NULL;
+    args->random_generation = 0;
     char *output_filename = NULL;
 
-    for (int i = 7; i < argc; i++)
+    // parse arguments in the expected order
+    for (int i = 1; i < argc; i++)
     {
-        if (strcmp(argv[i], "-m") == 0)
+        if (strcmp(argv[i], "-n") == 0)
         {
-            args->outmode = atoi(argv[++i]);
+            args->num_processors = atoi(argv[++i]);
+            if (args->num_processors < 1 || args->num_processors > 64)
+            {
+                fprintf(stderr, "Error: -n must be between 1 and 64.\n");
+                return 0;
+            }
+        }
+        else if (strcmp(argv[i], "-a") == 0)
+        {
+            if (strcmp(argv[++i], "M") == 0)
+            {
+                args->multi_queue = 1;
+                if (args->num_processors <= 1)
+                {
+                    fprintf(stderr, "Error: -a M requires -n to be greater than 1.\n");
+                    return 0;
+                }
+                if (strcmp(argv[++i], "RM") == 0)
+                {
+                    args->multi_queue = RM;
+                }
+                else if (strcmp(argv[i], "LM") == 0)
+                {
+                    args->multi_queue = LM;
+                }
+                else
+                {
+                    fprintf(stderr, "Error: Invalid queue selection method for multi-queue. Use RM or LM.\n");
+                    return 0;
+                }
+            }
+            else if (strcmp(argv[i], "S") == 0)
+            {
+                args->multi_queue = 0;
+                if (strcmp(argv[++i], "NA") != 0)
+                {
+                    fprintf(stderr, "Error: For single-queue (-a S), use NA as queue selection.\n");
+                    return 0;
+                }
+            }
+            else
+            {
+                fprintf(stderr, "Error: Invalid scheduling approach. Use S or M.\n");
+                return 0;
+            }
+        }
+        else if (strcmp(argv[i], "-s") == 0)
+        {
+            if (strcmp(argv[++i], "SJF") == 0)
+            {
+                args->scheduling_algo = SJF;
+            }
+            else if (strcmp(argv[i], "FCFS") == 0)
+            {
+                args->scheduling_algo = FCFS;
+            }
+            else
+            {
+                fprintf(stderr, "Error: Invalid scheduling algorithm. Use FCFS or SJF.\n");
+                return 0;
+            }
         }
         else if (strcmp(argv[i], "-i") == 0)
         {
+            if (args->random_generation)
+            {
+                fprintf(stderr, "Error: Specify either -i or -r, not both.\n");
+                return 0;
+            }
             args->input_file = argv[++i];
         }
         else if (strcmp(argv[i], "-r") == 0)
         {
+            if (args->input_file)
+            {
+                fprintf(stderr, "Error: Specify either -i or -r, not both.\n");
+                return 0;
+            }
             args->random_generation = 1;
             args->T = atoi(argv[++i]);
             args->T1 = atoi(argv[++i]);
@@ -334,15 +408,47 @@ int parse_arguments(int argc, char *argv[], arguments *args)
             args->L1 = atoi(argv[++i]);
             args->L2 = atoi(argv[++i]);
             args->PC = atoi(argv[++i]);
+            if (args->T <= 0 || args->T1 <= 0 || args->T2 <= 0 || args->L <= 0 || args->L1 <= 0 || args->L2 <= 0 || args->PC <= 0)
+            {
+                fprintf(stderr, "Error: All -r parameters must be positive integers.\n");
+                return 0;
+            }
+            if (args->T1 > args->T2 || args->L1 > args->L2)
+            {
+                fprintf(stderr, "Error: Ensure T1 <= T2 and L1 <= L2.\n");
+                return 0;
+            }
+        }
+        else if (strcmp(argv[i], "-m") == 0)
+        {
+            args->outmode = atoi(argv[++i]);
+            if (args->outmode < 1 || args->outmode > 3)
+            {
+                fprintf(stderr, "Error: -m must be 1, 2, or 3.\n");
+                return 0;
+            }
         }
         else if (strcmp(argv[i], "-o") == 0)
         {
             output_filename = argv[++i];
         }
+        else
+        {
+            fprintf(stderr, "Error: Unknown option %s.\n", argv[i]);
+            return 0;
+        }
     }
 
+    // Final checks
+    if (!args->input_file && !args->random_generation)
+    {
+        fprintf(stderr, "Error: Specify either -i or -r.\n");
+        return 0;
+    }
+
+    // Open output file if specified
     outfile = output_filename ? fopen(output_filename, "w") : stdout;
-    if (!outfile)
+    if (output_filename && !outfile)
     {
         perror("Error opening output file");
         return 0;
